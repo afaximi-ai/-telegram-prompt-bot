@@ -1,6 +1,6 @@
 import os
 import uuid
-import sqlite3
+import psycopg2
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,60 +16,68 @@ TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = 708544616
 CHANNEL = "@prompt_realistic"
 
+DATABASE_URL = os.environ["DATABASE_URL"]
+
+
 # =========================
-# SQLite Database
+# PostgreSQL
 # =========================
 
-DB_NAME = "prompts.db"
+def get_db_connection():
+    return psycopg2.connect(DATABASE_URL)
 
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS prompts (
             id TEXT PRIMARY KEY,
             prompt TEXT NOT NULL,
-            photo_id TEXT NOT NULL
+            photo_id TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
 def save_prompt(prompt_id, prompt, photo_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
         INSERT INTO prompts (id, prompt, photo_id)
-        VALUES (?, ?, ?)
+        VALUES (%s, %s, %s)
         """,
         (prompt_id, prompt, photo_id)
     )
 
     conn.commit()
+    cursor.close()
     conn.close()
 
 
 def get_prompt(prompt_id):
-    conn = sqlite3.connect(DB_NAME)
+    conn = get_db_connection()
     cursor = conn.cursor()
 
     cursor.execute(
         """
         SELECT prompt
         FROM prompts
-        WHERE id = ?
+        WHERE id = %s
         """,
         (prompt_id,)
     )
 
     result = cursor.fetchone()
 
+    cursor.close()
     conn.close()
 
     if result:
@@ -83,7 +91,6 @@ def get_prompt(prompt_id):
 # =========================
 
 async def is_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
     user_id = update.effective_user.id
 
     if user_id == ADMIN_ID:
@@ -146,17 +153,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if context.args:
-
         prompt_id = context.args[0]
 
         prompt = get_prompt(prompt_id)
 
         if prompt:
-
             await update.message.reply_text(
                 "✨ پرامپت:\n\n" + prompt
             )
-
             return
 
     await update.message.reply_text(
@@ -175,7 +179,6 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
 
     try:
-
         member = await context.bot.get_chat_member(
             chat_id=CHANNEL,
             user_id=user_id
@@ -188,20 +191,16 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
     except Exception:
-
         is_joined = False
 
     if is_joined:
-
         await query.answer("✅ عضویت تأیید شد!")
 
         await query.edit_message_text(
             "✅ عضویت شما تأیید شد!\n\n"
             "حالا دوباره روی دکمه «✨ دریافت پرامپت» بزنید."
         )
-
     else:
-
         await query.answer(
             "❌ هنوز عضو کانال نشده‌اید!",
             show_alert=True
@@ -258,16 +257,15 @@ async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # ساخت ID
     prompt_id = uuid.uuid4().hex[:8]
 
-    # ذخیره دائمی در SQLite
+    # ذخیره دائمی در PostgreSQL
     save_prompt(
         prompt_id,
         prompt,
         photo
     )
 
-    # لینک دریافت پرامپت
+    # ساخت لینک
     bot_username = (await context.bot.get_me()).username
-
     link = f"https://t.me/{bot_username}?start={prompt_id}"
 
     keyboard = InlineKeyboardMarkup([
@@ -292,7 +290,6 @@ async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🔗 لینک دریافت پرامپت:\n{link}"
     )
 
-    # پاک کردن اطلاعات موقت عکس
     context.user_data.clear()
 
 
@@ -302,7 +299,7 @@ async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
 
-    # ساخت دیتابیس در اولین اجرا
+    # ساخت جدول در PostgreSQL
     init_db()
 
     app = Application.builder().token(TOKEN).build()
