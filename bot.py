@@ -1,6 +1,6 @@
 import os
 import uuid
-import psycopg2
+import sqlite3
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,15 +16,16 @@ TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = 708544616
 CHANNEL = "@prompt_realistic"
 
-DATABASE_URL = os.environ["DATABASE_URL"]
+DB_FILE = "bot.db"
 
 
 # =========================
-# PostgreSQL
+# SQLite
 # =========================
 
 def get_db_connection():
-    return psycopg2.connect(DATABASE_URL)
+    conn = sqlite3.connect(DB_FILE)
+    return conn
 
 
 def init_db():
@@ -41,7 +42,6 @@ def init_db():
     """)
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -52,13 +52,12 @@ def save_prompt(prompt_id, prompt, photo_id):
     cursor.execute(
         """
         INSERT INTO prompts (id, prompt, photo_id)
-        VALUES (%s, %s, %s)
+        VALUES (?, ?, ?)
         """,
         (prompt_id, prompt, photo_id)
     )
 
     conn.commit()
-    cursor.close()
     conn.close()
 
 
@@ -70,14 +69,13 @@ def get_prompt(prompt_id):
         """
         SELECT prompt
         FROM prompts
-        WHERE id = %s
+        WHERE id = ?
         """,
         (prompt_id,)
     )
 
     result = cursor.fetchone()
 
-    cursor.close()
     conn.close()
 
     if result:
@@ -254,10 +252,9 @@ async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = update.message.text
     photo = context.user_data["photo"]
 
-    # ساخت ID
     prompt_id = uuid.uuid4().hex[:8]
 
-    # ذخیره دائمی در PostgreSQL
+    # ذخیره در SQLite
     save_prompt(
         prompt_id,
         prompt,
@@ -299,7 +296,7 @@ async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 def main():
 
-    # ساخت جدول در PostgreSQL
+    # ساخت دیتابیس SQLite
     init_db()
 
     app = Application.builder().token(TOKEN).build()
