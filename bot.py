@@ -16,7 +16,7 @@ TOKEN = os.environ["BOT_TOKEN"]
 ADMIN_ID = 708544616
 CHANNEL = "@prompt_realistic"
 
-DB_FILE = "bot.db"
+DB_FILE = "/data/bot.db"
 
 
 # =========================
