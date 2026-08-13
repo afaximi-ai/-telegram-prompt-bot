@@ -146,13 +146,25 @@ async def membership_message(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
+    # اگر کاربر از لینک دریافت پرامپت آمده باشد
+    if context.args:
+        prompt_id = context.args[0]
+
+        # ذخیره موقت شناسه پرامپت
+        context.user_data["pending_prompt_id"] = prompt_id
+
+    # بررسی عضویت
     if not await is_member(update, context):
         await membership_message(update, context)
         return
 
-    if context.args:
-        prompt_id = context.args[0]
+    # اگر عضو باشد، پرامپت را مستقیم نمایش بده
+    prompt_id = context.user_data.pop(
+        "pending_prompt_id",
+        None
+    )
 
+    if prompt_id:
         prompt = get_prompt(prompt_id)
 
         if prompt:
@@ -192,13 +204,31 @@ async def check_membership(update: Update, context: ContextTypes.DEFAULT_TYPE):
         is_joined = False
 
     if is_joined:
+
         await query.answer("✅ عضویت تأیید شد!")
 
-        await query.edit_message_text(
-            "✅ عضویت شما تأیید شد!\n\n"
-            "حالا دوباره روی دکمه «✨ دریافت پرامپت» بزنید."
+        # دریافت شناسه پرامپتی که کاربر قبلاً درخواست کرده بود
+        prompt_id = context.user_data.pop(
+            "pending_prompt_id",
+            None
         )
+
+        if prompt_id:
+
+            prompt = get_prompt(prompt_id)
+
+            if prompt:
+                await query.edit_message_text(
+                    "✨ پرامپت:\n\n" + prompt
+                )
+                return
+
+        await query.edit_message_text(
+            "✅ عضویت شما تأیید شد!"
+        )
+
     else:
+
         await query.answer(
             "❌ هنوز عضو کانال نشده‌اید!",
             show_alert=True
