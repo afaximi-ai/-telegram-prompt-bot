@@ -1,86 +1,114 @@
 import os
 import uuid
 
-from telegram import (
-    Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
-)
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
-    CallbackQueryHandler,
     ContextTypes,
     filters,
 )
 
 TOKEN = os.environ["BOT_TOKEN"]
 
-# آیدی عددی خودت را اینجا قرار بده
 ADMIN_ID = 708544616
+CHANNEL = "@prompt_realistic"
 
 prompts = {}
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    args = context.args
-
-    if args:
-        prompt_id = args[0]
+    if context.args:
+        prompt_id = context.args[0]
 
         if prompt_id in prompts:
-            prompt = prompts[prompt_id]
-
             await update.message.reply_text(
-                "✨ پرامپت:\n\n" + prompt
+                "✨ پرامپت:\n\n" + prompts[prompt_id]
             )
             return
 
     await update.message.reply_text(
         "سلام 👋\n"
-        "برای دریافت پرامپت از لینک اختصاصی همان تصویر استفاده کن."
+        "عکس + پرامپت را برای من بفرست."
     )
 
 
-async def add_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def new_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID:
         return
 
-    if not context.args:
-        await update.message.reply_text(
-            "بعد از /add پرامپت را بنویس."
-        )
+    await update.message.reply_text(
+        "📸 اول عکس را بفرست.\n"
+        "بعد در پیام بعدی پرامپت را بفرست."
+    )
+
+
+async def receive_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
         return
 
-    prompt = " ".join(context.args)
+    context.user_data["photo"] = update.message.photo[-1].file_id
+
+    await update.message.reply_text(
+        "✅ عکس دریافت شد.\n\n"
+        "حالا پرامپت را در پیام بعدی بفرست."
+    )
+
+
+async def receive_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    if "photo" not in context.user_data:
+        return
+
+    prompt = update.message.text
+    photo = context.user_data["photo"]
 
     prompt_id = uuid.uuid4().hex[:8]
     prompts[prompt_id] = prompt
 
     bot_username = (await context.bot.get_me()).username
-
     link = f"https://t.me/{bot_username}?start={prompt_id}"
 
-    await update.message.reply_text(
-        "✅ پرامپت ثبت شد!\n\n"
-        "🔗 لینک دریافت پرامپت:\n"
-        f"{link}\n\n"
-        "این لینک را می‌توانی به دکمه پست کانالت وصل کنی."
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✨ دریافت پرامپت",
+                url=link
+            )
+        ]
+    ])
+
+    await context.bot.send_photo(
+        chat_id=CHANNEL,
+        photo=photo,
+        caption="✨ Prompt Realistic",
+        reply_markup=keyboard
     )
 
+    await update.message.reply_text(
+        "✅ پست با موفقیت در کانال منتشر شد!\n\n"
+        f"🔗 لینک دریافت پرامپت:\n{link}"
+    )
 
-async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
+    context.user_data.clear()
 
 
 def main():
     app = Application.builder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("add", add_prompt))
-    app.add_handler(CallbackQueryHandler(button))
+    app.add_handler(CommandHandler("new", new_prompt))
+
+    app.add_handler(
+        MessageHandler(filters.PHOTO, receive_photo)
+    )
+
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND, receive_prompt)
+    )
 
     app.run_polling()
 
