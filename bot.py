@@ -927,12 +927,23 @@ async def receive_prompt(
 
         if len(photos) == 1:
 
+            # =================================================
+            # عکس تکی:
+            # دکمه مستقیماً زیر خود عکس قرار می‌گیرد
+            # هیچ پیام خالی یا پیام جداگانه‌ای ایجاد نمی‌شود
+            # =================================================
+
             await context.bot.send_photo(
                 chat_id=CHANNEL,
-                photo=photos[0]
+                photo=photos[0],
+                reply_markup=keyboard
             )
 
         else:
+
+            # =================================================
+            # آلبوم چندعکسی
+            # =================================================
 
             media = []
 
@@ -949,11 +960,12 @@ async def receive_prompt(
                 media=media
             )
 
-        await context.bot.send_message(
-            chat_id=CHANNEL,
-            text="✨ دریافت پرامپت",
-            reply_markup=keyboard
-        )
+            # برای آلبوم، دکمه جداگانه ارسال می‌شود
+            await context.bot.send_message(
+                chat_id=CHANNEL,
+                text="✨ دریافت پرامپت",
+                reply_markup=keyboard
+            )
 
     except Exception as e:
 
