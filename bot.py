@@ -790,9 +790,7 @@ async def receive_photo(
         return
 
     await update.message.reply_text(
-        "✅ عکس دریافت شد.\n\n"
-        "📝 حالا پرامپت را بفرست تا عکس و پرامپت را باهم در کانال منتشر کنم.",
-        reply_markup=get_main_keyboard()
+        "📝 پرامپت را بفرست تا عکس و پرامپت را باهم در کانال منتشر کنم."
     )
 
 
