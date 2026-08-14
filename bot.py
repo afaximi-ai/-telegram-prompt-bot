@@ -2,7 +2,6 @@ import os
 import uuid
 import json
 import sqlite3
-import base64
 from google import genai
 from google.genai import types
 from telegram import (
@@ -23,7 +22,6 @@ from telegram.ext import (
 # تنظیمات
 # =========================
 TOKEN = os.environ["BOT_TOKEN"]
-# API Key جمینای
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 ADMIN_ID = 708544616
 CHANNEL = "@prompt_realistic"
@@ -31,7 +29,7 @@ DB_FILE = "/data/bot.db"
 # مدل Gemini
 GEMINI_MODEL = "gemini-3.5-flash"
 # =========================
-# Gemini Client
+# Gemini
 # =========================
 gemini_client = None
 if GEMINI_API_KEY:
@@ -91,14 +89,13 @@ def get_prompt(prompt_id):
         return result[0]
     return None
 # =========================
-# بررسی عضویت کانال
+# بررسی عضویت
 # =========================
 async def is_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
     user_id = update.effective_user.id
-    # ادمین نیازی به عضویت ندارد
     if user_id == ADMIN_ID:
         return True
     try:
@@ -148,18 +145,15 @@ async def start(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    # اگر کاربر از لینک دریافت پرامپت آمده
     if context.args:
         prompt_id = context.args[0]
         context.user_data["pending_prompt_id"] = prompt_id
-    # بررسی عضویت
     if not await is_member(update, context):
         await membership_message(
             update,
             context
         )
         return
-    # اگر عضو است، پرامپت را نمایش بده
     prompt_id = context.user_data.pop(
         "pending_prompt_id",
         None
@@ -178,45 +172,47 @@ async def start(
         "از منوی ربات گزینه «ساخت پرامپت از عکس» را انتخاب کن."
     )
 # =========================
-# منوی ساخت پرامپت از عکس
+# ساخت پرامپت از عکس
 # =========================
 async def prompt_from_photo_command(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    # بررسی عضویت
     if not await is_member(update, context):
         await membership_message(
             update,
             context
         )
         return
-    # فعال کردن حالت
-    context.user_data["waiting_for_prompt_from_photo"] = True
+    # پاک کردن حالت‌های قبلی
+    context.user_data.pop(
+        "photos",
+        None
+    )
+    context.user_data[
+        "waiting_for_prompt_from_photo"
+    ] = True
     await update.message.reply_text(
         "🪄 ساخت پرامپت از عکس\n\n"
-        "📸 حالا عکسی که می‌خواهی از روی آن پرامپت بسازم را ارسال کن.\n\n"
-        "من تصویر را بررسی می‌کنم و یک پرامپت انگلیسی "
-        "حرفه‌ای و دقیق برای تولید مجدد تصویر می‌سازم."
+        "📸 حالا عکس را ارسال کن.\n\n"
+        "🤖 عکس را تحلیل می‌کنم و یک پرامپت "
+        "انگلیسی حرفه‌ای و دقیق برایت می‌سازم."
     )
 # =========================
-# تحلیل عکس و ساخت پرامپت
+# Gemini Vision
 # =========================
 async def generate_prompt_from_photo(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    # فقط زمانی اجرا شود که کاربر این قابلیت را انتخاب کرده باشد
     if not context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
         return
-    # بررسی API Key
     if not GEMINI_API_KEY or gemini_client is None:
         await update.message.reply_text(
-            "❌ API جمینای هنوز تنظیم نشده است.\n\n"
-            "لطفاً GEMINI_API_KEY را در Environment Variables "
-            "تنظیم کن."
+            "❌ API جمینای تنظیم نشده است.\n\n"
+            "GEMINI_API_KEY را در Railway Variables قرار بده."
         )
         context.user_data.pop(
             "waiting_for_prompt_from_photo",
@@ -226,36 +222,41 @@ async def generate_prompt_from_photo(
     try:
         await update.message.reply_text(
             "🔍 عکس دریافت شد...\n\n"
-            "🤖 در حال تحلیل تصویر و ساخت پرامپت حرفه‌ای هستم..."
+            "🤖 در حال تحلیل تصویر و ساخت پرامپت..."
         )
         # =========================
-        # دریافت فایل تلگرام
+        # دریافت عکس
         # =========================
         photo = update.message.photo[-1]
         telegram_file = await context.bot.get_file(
             photo.file_id
         )
-        # دانلود در حافظه
         image_bytes = await telegram_file.download_as_bytearray()
         # =========================
-        # ساخت پرامپت تحلیلی
+        # دستور تحلیل
         # =========================
         analysis_prompt = """
-Analyze the provided image extremely carefully and create a highly detailed
-English prompt that can be used to recreate the image with an AI image
-generator.
-Describe the image objectively and visually.
-Include, when visible:
-- Main subject and identity-neutral physical appearance
-- Face and facial features
+Analyze the provided image extremely carefully.
+Create ONE highly detailed English prompt that can be used
+to recreate the image with an AI image generator.
+Describe ONLY what is visually present.
+Include:
+- Main subject
+- Gender presentation if visually apparent
+- Approximate age appearance
+- Face
+- Facial features
 - Hair
 - Skin tone
-- Clothing and accessories
-- Pose and body position
+- Clothing
+- Accessories
+- Pose
+- Body position
 - Hand position
 - Facial expression
 - Camera angle
-- Framing and composition
+- Framing
+- Composition
 - Perspective
 - Background
 - Environment
@@ -266,16 +267,17 @@ Include, when visible:
 - Depth of field
 - Lens characteristics
 - Camera style
-- Image quality
 - Photorealism
-- Important small visual details
+- Image quality
+- Fine visual details
 If text is visible in the image, describe it accurately.
-Do NOT mention that you are analyzing an image.
-Do NOT use explanations before or after the prompt.
+Do NOT explain your answer.
+Do NOT say that you analyzed an image.
+Do NOT add headings.
+Do NOT add notes.
 Return ONLY the final English image-generation prompt.
-Make the prompt detailed, natural, professional and optimized for
-photorealistic AI image generation.
-Do not invent major elements that are not visible in the image.
+Make it detailed, natural and professional.
+Do not invent important elements that are not visible.
 """
         # =========================
         # ارسال تصویر به Gemini
@@ -299,7 +301,7 @@ Do not invent major elements that are not visible in the image.
             return
         generated_prompt = generated_prompt.strip()
         # =========================
-        # ارسال پرامپت
+        # ارسال نتیجه
         # =========================
         await update.message.reply_text(
             "✨ پرامپت ساخته شد:\n\n"
@@ -320,7 +322,7 @@ Do not invent major elements that are not visible in the image.
             None
         )
 # =========================
-# بررسی دوباره عضویت
+# بررسی عضویت دوباره
 # =========================
 async def check_membership(
     update: Update,
@@ -356,8 +358,7 @@ async def check_membership(
                 )
                 return
         await query.edit_message_text(
-            "✅ عضویت شما تأیید شد!\n\n"
-            "حالا می‌توانید از ربات استفاده کنید."
+            "✅ عضویت شما تأیید شد!"
         )
     else:
         await query.answer(
@@ -373,9 +374,7 @@ async def new_prompt(
 ):
     if update.effective_user.id != ADMIN_ID:
         return
-    # پاک کردن اطلاعات قبلی
     context.user_data.clear()
-    # ایجاد لیست عکس‌ها
     context.user_data["photos"] = []
     await update.message.reply_text(
         "📸 حالا عکس‌ها را یکی‌یکی بفرست.\n\n"
@@ -384,7 +383,7 @@ async def new_prompt(
         "بعد از تمام شدن عکس‌ها، پرامپت را بفرست."
     )
 # =========================
-# دریافت عکس
+# دریافت عکس برای پست
 # =========================
 async def receive_photo(
     update: Update,
@@ -392,20 +391,22 @@ async def receive_photo(
 ):
     if update.effective_user.id != ADMIN_ID:
         return
-    # اگر /new زده نشده باشد
+    # اگر در حالت ساخت پرامپت هستیم
+    # این هندلر نباید کاری انجام دهد
+    if context.user_data.get(
+        "waiting_for_prompt_from_photo"
+    ):
+        return
     if "photos" not in context.user_data:
         context.user_data["photos"] = []
     photos = context.user_data["photos"]
-    # حداکثر ۱۰ عکس
     if len(photos) >= 10:
         await update.message.reply_text(
             "❌ برای یک پست حداکثر ۱۰ عکس می‌توانی بفرستی.\n\n"
             "حالا پرامپت را بفرست."
         )
         return
-    # بهترین کیفیت عکس
     photo_id = update.message.photo[-1].file_id
-    # اضافه کردن عکس
     photos.append(photo_id)
     count = len(photos)
     await update.message.reply_text(
@@ -414,7 +415,7 @@ async def receive_photo(
         "📝 وقتی تمام شد، پرامپت را بفرست."
     )
 # =========================
-# دریافت پرامپت
+# دریافت پرامپت ادمین
 # =========================
 async def receive_prompt(
     update: Update,
@@ -422,7 +423,11 @@ async def receive_prompt(
 ):
     if update.effective_user.id != ADMIN_ID:
         return
-    # بررسی وجود عکس
+    # اگر در حالت ساخت پرامپت هستیم
+    if context.user_data.get(
+        "waiting_for_prompt_from_photo"
+    ):
+        return
     if "photos" not in context.user_data:
         return
     photos = context.user_data["photos"]
@@ -431,7 +436,6 @@ async def receive_prompt(
             "❌ هنوز هیچ عکسی دریافت نشده است."
         )
         return
-    # متن پرامپت
     prompt = update.message.text
     if not prompt or not prompt.strip():
         await update.message.reply_text(
@@ -443,7 +447,7 @@ async def receive_prompt(
     # =========================
     prompt_id = uuid.uuid4().hex[:8]
     # =========================
-    # ذخیره در SQLite
+    # ذخیره
     # =========================
     save_prompt(
         prompt_id,
@@ -451,7 +455,7 @@ async def receive_prompt(
         photos
     )
     # =========================
-    # ساخت لینک
+    # لینک
     # =========================
     bot_username = (
         await context.bot.get_me()
@@ -462,7 +466,7 @@ async def receive_prompt(
         f"?start={prompt_id}"
     )
     # =========================
-    # ساخت دکمه
+    # دکمه
     # =========================
     keyboard = InlineKeyboardMarkup([
         [
@@ -473,7 +477,7 @@ async def receive_prompt(
         ]
     ])
     # =========================
-    # ساخت آلبوم
+    # آلبوم
     # =========================
     media_group = []
     for photo_id in photos:
@@ -483,7 +487,7 @@ async def receive_prompt(
             )
         )
     # =========================
-    # ارسال آلبوم
+    # ارسال کانال
     # =========================
     try:
         sent_messages = await context.bot.send_media_group(
@@ -497,7 +501,7 @@ async def receive_prompt(
         )
         return
     # =========================
-    # قرار دادن دکمه روی عکس اول
+    # دکمه روی عکس اول
     # =========================
     try:
         await context.bot.edit_message_reply_markup(
@@ -507,24 +511,21 @@ async def receive_prompt(
         )
     except Exception as e:
         await update.message.reply_text(
-            "⚠️ عکس‌ها در کانال منتشر شدند، "
-            "اما قرار دادن دکمه با خطا مواجه شد:\n\n"
+            "⚠️ عکس‌ها منتشر شدند، "
+            "اما قرار دادن دکمه با خطا مواجه شد.\n\n"
             f"{e}\n\n"
             f"🔗 لینک دریافت پرامپت:\n{link}"
         )
         context.user_data.clear()
         return
     # =========================
-    # پیام موفقیت برای ادمین
+    # موفقیت
     # =========================
     await update.message.reply_text(
         "✅ پست با موفقیت در کانال منتشر شد!\n\n"
         f"📸 تعداد عکس‌ها: {len(photos)}\n"
         f"🔗 لینک دریافت پرامپت:\n{link}"
     )
-    # =========================
-    # پاک کردن اطلاعات موقت
-    # =========================
     context.user_data.clear()
 # =========================
 # تنظیم منوی ربات
@@ -550,9 +551,7 @@ async def setup_bot_menu(
 # اجرای ربات
 # =========================
 def main():
-    # ساخت دیتابیس
     init_db()
-    # ساخت Application
     app = (
         Application
         .builder()
@@ -582,29 +581,24 @@ def main():
         )
     )
     # =========================
-    # عکس برای ساخت پرامپت
-    #
-    # این هندلر باید قبل از receive_photo باشد
+    # عکس
     # =========================
+    # این هندلر برای ساخت پرامپت از عکس است
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
             generate_prompt_from_photo
-        ),
-        group=0
+        )
     )
-    # =========================
-    # دریافت عکس‌های ادمین
-    # =========================
+    # این هندلر برای عکس‌های ادمین در /new است
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
             receive_photo
-        ),
-        group=1
+        )
     )
     # =========================
-    # دریافت پرامپت ادمین
+    # متن
     # =========================
     app.add_handler(
         MessageHandler(
@@ -613,7 +607,7 @@ def main():
         )
     )
     # =========================
-    # بررسی عضویت
+    # عضویت
     # =========================
     app.add_handler(
         CallbackQueryHandler(
@@ -622,10 +616,9 @@ def main():
         )
     )
     print("Bot is running...")
-    # اجرای ربات
     app.run_polling()
 # =========================
-# شروع برنامه
+# شروع
 # =========================
 if __name__ == "__main__":
     main()
