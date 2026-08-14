@@ -163,6 +163,7 @@ async def is_member(
 
     user_id = update.effective_user.id
 
+    # ادمین نیازی به عضویت ندارد
     if user_id == ADMIN_ID:
         return True
 
@@ -226,12 +227,14 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # اگر کاربر از لینک دریافت پرامپت آمده
     if context.args:
 
         prompt_id = context.args[0]
 
         context.user_data["pending_prompt_id"] = prompt_id
 
+    # بررسی عضویت
     if not await is_member(update, context):
 
         await membership_message(
@@ -241,6 +244,7 @@ async def start(
 
         return
 
+    # دریافت پرامپت ذخیره شده
     prompt_id = context.user_data.pop(
         "pending_prompt_id",
         None
@@ -259,6 +263,7 @@ async def start(
 
             return
 
+    # پیام اصلی
     await update.message.reply_text(
         "سلام 👋\n\n"
         "به ربات Prompt Realistic خوش آمدی ✨\n\n"
@@ -269,13 +274,16 @@ async def start(
 
 
 # =========================
-# ارسال پرامپت با دکمه Copy
+# ارسال پرامپت با دکمه کپی
 # =========================
 
 async def send_prompt_result(
     update: Update,
     prompt: str
 ):
+
+    # دکمه Copy واقعی تلگرام
+    # برای متن‌های حداکثر 256 کاراکتر
 
     if len(prompt) <= 256:
 
@@ -317,6 +325,7 @@ async def prompt_from_photo_command(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # بررسی عضویت
     if not await is_member(update, context):
 
         await membership_message(
@@ -326,7 +335,7 @@ async def prompt_from_photo_command(
 
         return
 
-    # پاک کردن حالت انتشار پست
+    # پاک کردن حالت‌های قبلی
     context.user_data.pop(
         "photos",
         None
@@ -355,7 +364,7 @@ async def generate_prompt_from_photo(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # فقط وقتی کاربر روی ساخت پرامپت زده باشد
+    # فقط وقتی حالت ساخت پرامپت فعال است
     if not context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
@@ -386,7 +395,7 @@ async def generate_prompt_from_photo(
         )
 
         # =========================
-        # دریافت عکس از تلگرام
+        # دریافت عکس
         # =========================
 
         photo = update.message.photo[-1]
@@ -398,7 +407,7 @@ async def generate_prompt_from_photo(
         image_bytes = await telegram_file.download_as_bytearray()
 
         # =========================
-        # دستور Gemini
+        # پرامپت Gemini
         # =========================
 
         analysis_prompt = """
@@ -579,7 +588,8 @@ async def check_membership(
                     ])
 
                     await query.message.reply_text(
-                        "✨ پرامپت:\n\n" + prompt,
+                        "✨ پرامپت:\n\n"
+                        + prompt,
                         reply_markup=keyboard
                     )
 
@@ -651,7 +661,7 @@ async def receive_photo(
     if update.effective_user.id != ADMIN_ID:
         return
 
-    # اگر در حالت ساخت پرامپت از عکس هستیم
+    # اگر در حالت ساخت پرامپت هستیم
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
@@ -663,6 +673,7 @@ async def receive_photo(
 
     photos = context.user_data["photos"]
 
+    # حداکثر ۱۰ عکس
     if len(photos) >= 10:
 
         await update.message.reply_text(
@@ -699,12 +710,13 @@ async def receive_prompt(
     if update.effective_user.id != ADMIN_ID:
         return
 
-    # اگر در حالت ساخت پرامپت از عکس هستیم
+    # اگر در حالت ساخت پرامپت هستیم
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
         return
 
+    # اگر /new زده نشده
     if "photos" not in context.user_data:
         return
 
@@ -781,7 +793,7 @@ async def receive_prompt(
 
     for index, photo_id in enumerate(photos):
 
-        # فقط عکس اول کپشن داشته باشد
+        # فقط عکس اول کپشن دارد
         if index == 0:
 
             media_group.append(
@@ -805,7 +817,7 @@ async def receive_prompt(
             )
 
     # =========================
-    # ارسال آلبوم به کانال
+    # ارسال آلبوم
     # =========================
 
     try:
@@ -826,8 +838,7 @@ async def receive_prompt(
         return
 
     # =========================
-    # دکمه دریافت پرامپت
-    # روی عکس اول
+    # اضافه کردن دکمه دریافت پرامپت
     # =========================
 
     try:
@@ -840,6 +851,23 @@ async def receive_prompt(
 
     except Exception as e:
 
+        error_text = str(e)
+
+        # اگر تلگرام گفت پیام تغییری نکرده
+        if "Message is not modified" in error_text:
+
+            await update.message.reply_text(
+                "✅ پست با موفقیت در کانال منتشر شد!\n\n"
+                f"📸 تعداد عکس‌ها: {len(photos)}\n"
+                f"🔗 لینک دریافت پرامپت:\n{link}",
+                reply_markup=get_main_keyboard()
+            )
+
+            context.user_data.clear()
+
+            return
+
+        # خطای واقعی
         await update.message.reply_text(
             "⚠️ عکس‌ها در کانال منتشر شدند، "
             "اما قرار دادن دکمه با خطا مواجه شد.\n\n"
@@ -863,7 +891,6 @@ async def receive_prompt(
         reply_markup=get_main_keyboard()
     )
 
-    # پاک کردن اطلاعات موقت
     context.user_data.clear()
 
 
@@ -905,7 +932,7 @@ def main():
     )
 
     # =========================
-    # دکمه ساخت پرامپت از عکس
+    # دکمه ساخت پرامپت
     # =========================
 
     app.add_handler(
@@ -920,21 +947,15 @@ def main():
     )
 
     # =========================
-    # عکس برای ساخت پرامپت
-    # فقط وقتی حالت ساخت پرامپت فعال است
+    # دریافت عکس
     # =========================
 
     app.add_handler(
         MessageHandler(
-            filters.PHOTO
-            & filters.User(user_id=None),
+            filters.PHOTO,
             generate_prompt_from_photo
         )
     )
-
-    # =========================
-    # عکس‌های /new
-    # =========================
 
     app.add_handler(
         MessageHandler(
@@ -944,7 +965,7 @@ def main():
     )
 
     # =========================
-    # دریافت متن پرامپت ادمین
+    # دریافت متن پرامپت
     # =========================
 
     app.add_handler(
