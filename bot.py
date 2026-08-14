@@ -2,6 +2,9 @@ import os
 import uuid
 import json
 import sqlite3
+import base64
+from google import genai
+from google.genai import types
 from telegram import (
     Update,
     InlineKeyboardButton,
@@ -20,9 +23,21 @@ from telegram.ext import (
 # تنظیمات
 # =========================
 TOKEN = os.environ["BOT_TOKEN"]
+# API Key جمینای
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 ADMIN_ID = 708544616
 CHANNEL = "@prompt_realistic"
 DB_FILE = "/data/bot.db"
+# مدل Gemini
+GEMINI_MODEL = "gemini-3.5-flash"
+# =========================
+# Gemini Client
+# =========================
+gemini_client = None
+if GEMINI_API_KEY:
+    gemini_client = genai.Client(
+        api_key=GEMINI_API_KEY
+    )
 # =========================
 # SQLite
 # =========================
@@ -45,7 +60,6 @@ def init_db():
 def save_prompt(prompt_id, prompt, photo_ids):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # تبدیل لیست عکس‌ها به JSON
     photo_ids_json = json.dumps(photo_ids)
     cursor.execute(
         """
@@ -159,8 +173,152 @@ async def start(
             return
     await update.message.reply_text(
         "سلام 👋\n\n"
-        "عکس + پرامپت را برای من بفرست."
+        "📸 عکس + پرامپت را برای من بفرست.\n\n"
+        "🪄 برای ساخت پرامپت از روی عکس، "
+        "از منوی ربات گزینه «ساخت پرامپت از عکس» را انتخاب کن."
     )
+# =========================
+# منوی ساخت پرامپت از عکس
+# =========================
+async def prompt_from_photo_command(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    # بررسی عضویت
+    if not await is_member(update, context):
+        await membership_message(
+            update,
+            context
+        )
+        return
+    # فعال کردن حالت
+    context.user_data["waiting_for_prompt_from_photo"] = True
+    await update.message.reply_text(
+        "🪄 ساخت پرامپت از عکس\n\n"
+        "📸 حالا عکسی که می‌خواهی از روی آن پرامپت بسازم را ارسال کن.\n\n"
+        "من تصویر را بررسی می‌کنم و یک پرامپت انگلیسی "
+        "حرفه‌ای و دقیق برای تولید مجدد تصویر می‌سازم."
+    )
+# =========================
+# تحلیل عکس و ساخت پرامپت
+# =========================
+async def generate_prompt_from_photo(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+    # فقط زمانی اجرا شود که کاربر این قابلیت را انتخاب کرده باشد
+    if not context.user_data.get(
+        "waiting_for_prompt_from_photo"
+    ):
+        return
+    # بررسی API Key
+    if not GEMINI_API_KEY or gemini_client is None:
+        await update.message.reply_text(
+            "❌ API جمینای هنوز تنظیم نشده است.\n\n"
+            "لطفاً GEMINI_API_KEY را در Environment Variables "
+            "تنظیم کن."
+        )
+        context.user_data.pop(
+            "waiting_for_prompt_from_photo",
+            None
+        )
+        return
+    try:
+        await update.message.reply_text(
+            "🔍 عکس دریافت شد...\n\n"
+            "🤖 در حال تحلیل تصویر و ساخت پرامپت حرفه‌ای هستم..."
+        )
+        # =========================
+        # دریافت فایل تلگرام
+        # =========================
+        photo = update.message.photo[-1]
+        telegram_file = await context.bot.get_file(
+            photo.file_id
+        )
+        # دانلود در حافظه
+        image_bytes = await telegram_file.download_as_bytearray()
+        # =========================
+        # ساخت پرامپت تحلیلی
+        # =========================
+        analysis_prompt = """
+Analyze the provided image extremely carefully and create a highly detailed
+English prompt that can be used to recreate the image with an AI image
+generator.
+Describe the image objectively and visually.
+Include, when visible:
+- Main subject and identity-neutral physical appearance
+- Face and facial features
+- Hair
+- Skin tone
+- Clothing and accessories
+- Pose and body position
+- Hand position
+- Facial expression
+- Camera angle
+- Framing and composition
+- Perspective
+- Background
+- Environment
+- Lighting
+- Shadows
+- Colors
+- Atmosphere
+- Depth of field
+- Lens characteristics
+- Camera style
+- Image quality
+- Photorealism
+- Important small visual details
+If text is visible in the image, describe it accurately.
+Do NOT mention that you are analyzing an image.
+Do NOT use explanations before or after the prompt.
+Return ONLY the final English image-generation prompt.
+Make the prompt detailed, natural, professional and optimized for
+photorealistic AI image generation.
+Do not invent major elements that are not visible in the image.
+"""
+        # =========================
+        # ارسال تصویر به Gemini
+        # =========================
+        image_part = types.Part.from_bytes(
+            data=bytes(image_bytes),
+            mime_type="image/jpeg"
+        )
+        response = gemini_client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=[
+                image_part,
+                analysis_prompt
+            ]
+        )
+        generated_prompt = response.text
+        if not generated_prompt:
+            await update.message.reply_text(
+                "❌ Gemini نتوانست پرامپت تولید کند."
+            )
+            return
+        generated_prompt = generated_prompt.strip()
+        # =========================
+        # ارسال پرامپت
+        # =========================
+        await update.message.reply_text(
+            "✨ پرامپت ساخته شد:\n\n"
+            + generated_prompt
+        )
+    except Exception as e:
+        print(
+            "Gemini error:",
+            repr(e)
+        )
+        await update.message.reply_text(
+            "❌ هنگام ساخت پرامپت خطایی رخ داد.\n\n"
+            "لطفاً دوباره امتحان کن."
+        )
+    finally:
+        context.user_data.pop(
+            "waiting_for_prompt_from_photo",
+            None
+        )
 # =========================
 # بررسی دوباره عضویت
 # =========================
@@ -198,7 +356,8 @@ async def check_membership(
                 )
                 return
         await query.edit_message_text(
-            "✅ عضویت شما تأیید شد!"
+            "✅ عضویت شما تأیید شد!\n\n"
+            "حالا می‌توانید از ربات استفاده کنید."
         )
     else:
         await query.answer(
@@ -368,6 +527,26 @@ async def receive_prompt(
     # =========================
     context.user_data.clear()
 # =========================
+# تنظیم منوی ربات
+# =========================
+async def setup_bot_menu(
+    application: Application
+):
+    await application.bot.set_my_commands([
+        (
+            "start",
+            "شروع ربات"
+        ),
+        (
+            "promptfromphoto",
+            "🪄 ساخت پرامپت از عکس"
+        ),
+        (
+            "new",
+            "📸 انتشار پست جدید"
+        )
+    ])
+# =========================
 # اجرای ربات
 # =========================
 def main():
@@ -378,6 +557,7 @@ def main():
         Application
         .builder()
         .token(TOKEN)
+        .post_init(setup_bot_menu)
         .build()
     )
     # =========================
@@ -395,17 +575,36 @@ def main():
             new_prompt
         )
     )
+    app.add_handler(
+        CommandHandler(
+            "promptfromphoto",
+            prompt_from_photo_command
+        )
+    )
     # =========================
-    # دریافت عکس
+    # عکس برای ساخت پرامپت
+    #
+    # این هندلر باید قبل از receive_photo باشد
+    # =========================
+    app.add_handler(
+        MessageHandler(
+            filters.PHOTO,
+            generate_prompt_from_photo
+        ),
+        group=0
+    )
+    # =========================
+    # دریافت عکس‌های ادمین
     # =========================
     app.add_handler(
         MessageHandler(
             filters.PHOTO,
             receive_photo
-        )
+        ),
+        group=1
     )
     # =========================
-    # دریافت پرامپت
+    # دریافت پرامپت ادمین
     # =========================
     app.add_handler(
         MessageHandler(
