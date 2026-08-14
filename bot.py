@@ -10,6 +10,7 @@ from telegram import (
     Update,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    InputMediaPhoto,
     ReplyKeyboardMarkup,
     KeyboardButton,
     CopyTextButton,
@@ -41,10 +42,9 @@ DB_FILE = "/data/bot.db"
 
 GEMINI_MODEL = "gemini-3.5-flash"
 
-# دکمه اصلی ربات
 PROMPT_BUTTON = "🪄 ✨ ساخت پرامپت از عکس"
 
-# متن زیر عکس اول در کانال
+# متنی که زیر عکس / آلبوم نمایش داده می‌شود
 CHANNEL_NAME = "Prompt Realistic ✨"
 
 
@@ -65,12 +65,16 @@ if GEMINI_API_KEY:
 # =========================================================
 
 def get_db_connection():
-    return sqlite3.connect(DB_FILE)
+
+    conn = sqlite3.connect(DB_FILE)
+
+    return conn
 
 
 def init_db():
 
     conn = get_db_connection()
+
     cursor = conn.cursor()
 
     cursor.execute("""
@@ -83,6 +87,7 @@ def init_db():
     """)
 
     conn.commit()
+
     conn.close()
 
 
@@ -93,6 +98,7 @@ def save_prompt(
 ):
 
     conn = get_db_connection()
+
     cursor = conn.cursor()
 
     photo_ids_json = json.dumps(
@@ -113,12 +119,14 @@ def save_prompt(
     )
 
     conn.commit()
+
     conn.close()
 
 
 def get_prompt(prompt_id):
 
     conn = get_db_connection()
+
     cursor = conn.cursor()
 
     cursor.execute(
@@ -141,7 +149,7 @@ def get_prompt(prompt_id):
 
 
 # =========================================================
-# کیبورد اصلی پایین ربات
+# کیبورد اصلی ربات
 # =========================================================
 
 def get_main_keyboard():
@@ -189,12 +197,7 @@ async def is_member(
             "creator"
         ]
 
-    except Exception as e:
-
-        print(
-            "Membership error:",
-            repr(e)
-        )
+    except Exception:
 
         return False
 
@@ -233,7 +236,7 @@ async def membership_message(
 
 
 # =========================================================
-# ارسال نتیجه پرامپت + دکمه کپی
+# ارسال نتیجه پرامپت
 # =========================================================
 
 async def send_prompt_result(
@@ -241,10 +244,10 @@ async def send_prompt_result(
     prompt: str
 ):
 
-    prompt = prompt.strip()
+    # =====================================================
+    # دکمه واقعی Copy تلگرام
+    # =====================================================
 
-    # اگر پرامپت تا 256 کاراکتر باشد
-    # دکمه Copy واقعی تلگرام
     if len(prompt) <= 256:
 
         keyboard = InlineKeyboardMarkup([
@@ -277,7 +280,7 @@ async def send_prompt_result(
 
 
 # =========================================================
-# START
+# Start
 # =========================================================
 
 async def start(
@@ -285,7 +288,10 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # -----------------------------------------------------
     # اگر کاربر از لینک دریافت پرامپت آمده
+    # -----------------------------------------------------
+
     if context.args:
 
         prompt_id = context.args[0]
@@ -294,7 +300,10 @@ async def start(
             "pending_prompt_id"
         ] = prompt_id
 
+    # -----------------------------------------------------
     # بررسی عضویت
+    # -----------------------------------------------------
+
     if not await is_member(
         update,
         context
@@ -307,7 +316,10 @@ async def start(
 
         return
 
-    # بررسی پرامپت ذخیره شده
+    # -----------------------------------------------------
+    # دریافت پرامپت ذخیره‌شده
+    # -----------------------------------------------------
+
     prompt_id = context.user_data.pop(
         "pending_prompt_id",
         None
@@ -328,7 +340,10 @@ async def start(
 
             return
 
+    # -----------------------------------------------------
     # پیام اصلی
+    # -----------------------------------------------------
+
     await update.message.reply_text(
         "سلام 👋\n\n"
         "به ربات Prompt Realistic خوش آمدی ✨\n\n"
@@ -347,7 +362,10 @@ async def prompt_from_photo_command(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # -----------------------------------------------------
     # بررسی عضویت
+    # -----------------------------------------------------
+
     if not await is_member(
         update,
         context
@@ -360,13 +378,19 @@ async def prompt_from_photo_command(
 
         return
 
+    # -----------------------------------------------------
     # پاک کردن حالت قبلی
+    # -----------------------------------------------------
+
     context.user_data.pop(
         "photos",
         None
     )
 
+    # -----------------------------------------------------
     # فعال کردن حالت ساخت پرامپت
+    # -----------------------------------------------------
+
     context.user_data[
         "waiting_for_prompt_from_photo"
     ] = True
@@ -381,7 +405,7 @@ async def prompt_from_photo_command(
 
 
 # =========================================================
-# ساخت پرامپت با Gemini Vision
+# Gemini Vision
 # =========================================================
 
 async def generate_prompt_from_photo(
@@ -389,14 +413,17 @@ async def generate_prompt_from_photo(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # فقط اگر کاربر در حالت ساخت پرامپت باشد
+    # فقط وقتی حالت ساخت پرامپت فعال است
     if not context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
 
         return
 
+    # -----------------------------------------------------
     # بررسی API
+    # -----------------------------------------------------
+
     if not GEMINI_API_KEY or gemini_client is None:
 
         await update.message.reply_text(
@@ -435,7 +462,7 @@ async def generate_prompt_from_photo(
         )
 
         # =================================================
-        # دستور تحلیل Gemini
+        # دستور Gemini
         # =================================================
 
         analysis_prompt = """
@@ -496,7 +523,7 @@ Do not invent important elements that are not visible.
 """
 
         # =================================================
-        # ارسال تصویر به Gemini
+        # تصویر برای Gemini
         # =================================================
 
         image_part = types.Part.from_bytes(
@@ -513,10 +540,6 @@ Do not invent important elements that are not visible.
         )
 
         generated_prompt = response.text
-
-        # =================================================
-        # بررسی نتیجه
-        # =================================================
 
         if not generated_prompt:
 
@@ -553,7 +576,6 @@ Do not invent important elements that are not visible.
 
     finally:
 
-        # پایان حالت ساخت پرامپت
         context.user_data.pop(
             "waiting_for_prompt_from_photo",
             None
@@ -586,16 +608,14 @@ async def check_membership(
             "creator"
         ]
 
-    except Exception as e:
-
-        print(
-            "Membership check error:",
-            repr(e)
-        )
+    except Exception:
 
         is_joined = False
 
-    # هنوز عضو نیست
+    # -----------------------------------------------------
+    # عضو نشده
+    # -----------------------------------------------------
+
     if not is_joined:
 
         await query.answer(
@@ -605,7 +625,10 @@ async def check_membership(
 
         return
 
+    # -----------------------------------------------------
     # عضو شده
+    # -----------------------------------------------------
+
     await query.answer(
         "✅ عضویت تأیید شد!"
     )
@@ -623,7 +646,10 @@ async def check_membership(
 
         if prompt:
 
-            # اگر کوتاه باشد دکمه کپی واقعی
+            # ---------------------------------------------
+            # پرامپت کوتاه
+            # ---------------------------------------------
+
             if len(prompt) <= 256:
 
                 keyboard = InlineKeyboardMarkup([
@@ -638,15 +664,19 @@ async def check_membership(
                 ])
 
                 await query.message.reply_text(
-                    "✨ پرامپت ساخته شد:\n\n"
+                    "✨ پرامپت:\n\n"
                     + prompt,
                     reply_markup=keyboard
                 )
 
+            # ---------------------------------------------
+            # پرامپت طولانی
+            # ---------------------------------------------
+
             else:
 
                 await query.message.reply_text(
-                    "✨ پرامپت ساخته شد:\n\n"
+                    "✨ پرامپت:\n\n"
                     + prompt
                     + "\n\n"
                     "📋 برای کپی کردن، روی متن پیام نگه دار "
@@ -655,8 +685,11 @@ async def check_membership(
                 )
 
             try:
+
                 await query.delete_message()
+
             except Exception:
+
                 pass
 
             return
@@ -677,15 +710,14 @@ async def new_prompt(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # فقط ادمین
     if update.effective_user.id != ADMIN_ID:
 
         return
 
-    # پاک کردن حالت‌های قبلی
+    # پاک کردن حالت قبلی
     context.user_data.clear()
 
-    # ایجاد لیست عکس‌ها
+    # لیست عکس‌ها
     context.user_data[
         "photos"
     ] = []
@@ -709,12 +741,11 @@ async def receive_photo(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # فقط ادمین
     if update.effective_user.id != ADMIN_ID:
 
         return
 
-    # اگر ساخت پرامپت از عکس فعال است
+    # اگر حالت ساخت پرامپت از عکس فعال است
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
@@ -759,6 +790,31 @@ async def receive_photo(
 
 
 # =========================================================
+# ارسال پیام دکمه دریافت پرامپت
+# =========================================================
+
+async def send_channel_prompt_button(
+    context: ContextTypes.DEFAULT_TYPE,
+    prompt_link: str
+):
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton(
+                "✨ دریافت پرامپت",
+                url=prompt_link
+            )
+        ]
+    ])
+
+    await context.bot.send_message(
+        chat_id=CHANNEL,
+        text=CHANNEL_NAME,
+        reply_markup=keyboard
+    )
+
+
+# =========================================================
 # دریافت پرامپت ادمین
 # =========================================================
 
@@ -767,7 +823,6 @@ async def receive_prompt(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # فقط ادمین
     if update.effective_user.id != ADMIN_ID:
 
         return
@@ -808,15 +863,15 @@ async def receive_prompt(
 
         return
 
-    # =================================================
+    # =====================================================
     # ساخت ID
-    # =================================================
+    # =====================================================
 
     prompt_id = uuid.uuid4().hex[:8]
 
-    # =================================================
+    # =====================================================
     # ذخیره پرامپت
-    # =================================================
+    # =====================================================
 
     save_prompt(
         prompt_id,
@@ -824,9 +879,9 @@ async def receive_prompt(
         photos
     )
 
-    # =================================================
+    # =====================================================
     # ساخت لینک دریافت پرامپت
-    # =================================================
+    # =====================================================
 
     bot_username = (
         await context.bot.get_me()
@@ -838,72 +893,66 @@ async def receive_prompt(
         f"?start={prompt_id}"
     )
 
-    # =================================================
-    # دکمه دریافت پرامپت
-    # =================================================
-
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton(
-                "✨ دریافت پرامپت",
-                url=link
-            )
-        ]
-    ])
-
-    # =================================================
+    # =====================================================
     # ارسال عکس‌ها به کانال
-    #
-    # عکس اول:
-    #   کپشن = Prompt Realistic ✨
-    #   دکمه دریافت پرامپت
-    #
-    # عکس‌های بعدی:
-    #   بدون کپشن
-    # =================================================
+    # =====================================================
 
     try:
 
         # -------------------------------------------------
-        # عکس اول
+        # اگر فقط یک عکس داریم
         # -------------------------------------------------
 
-        await context.bot.send_photo(
-            chat_id=CHANNEL,
-            photo=photos[0],
-            caption=CHANNEL_NAME,
-            reply_markup=keyboard
-        )
-
-        # -------------------------------------------------
-        # عکس‌های بعدی
-        # -------------------------------------------------
-
-        for photo_id in photos[1:]:
+        if len(photos) == 1:
 
             await context.bot.send_photo(
                 chat_id=CHANNEL,
-                photo=photo_id
+                photo=photos[0]
             )
+
+        # -------------------------------------------------
+        # اگر چند عکس داریم
+        # -------------------------------------------------
+
+        else:
+
+            media_group = []
+
+            for photo_id in photos:
+
+                media_group.append(
+                    InputMediaPhoto(
+                        media=photo_id
+                    )
+                )
+
+            await context.bot.send_media_group(
+                chat_id=CHANNEL,
+                media=media_group
+            )
+
+        # -------------------------------------------------
+        # پیام جداگانه زیر آلبوم
+        # -------------------------------------------------
+
+        await send_channel_prompt_button(
+            context,
+            link
+        )
 
     except Exception as e:
 
-        print(
-            "Channel send error:",
-            repr(e)
-        )
-
         await update.message.reply_text(
-            "❌ خطا هنگام ارسال عکس‌ها به کانال:\n\n"
+            "❌ خطا هنگام ارسال پست به کانال:\n\n"
             f"{e}",
             reply_markup=get_main_keyboard()
         )
 
         return
 
-    # =================================================
-    # پیام موفقیت برای ادمین
-    # =================================================
+    # =====================================================
+    # موفقیت
+    # =====================================================
 
     await update.message.reply_text(
         "✅ پست با موفقیت در کانال منتشر شد!\n\n"
@@ -922,10 +971,16 @@ async def receive_prompt(
 
 def main():
 
-    # ساخت دیتابیس
+    # -----------------------------------------------------
+    # دیتابیس
+    # -----------------------------------------------------
+
     init_db()
 
-    # ساخت Application
+    # -----------------------------------------------------
+    # Application
+    # -----------------------------------------------------
+
     app = (
         Application
         .builder()
@@ -933,9 +988,9 @@ def main():
         .build()
     )
 
-    # =================================================
+    # =====================================================
     # /start
-    # =================================================
+    # =====================================================
 
     app.add_handler(
         CommandHandler(
@@ -944,10 +999,10 @@ def main():
         )
     )
 
-    # =================================================
+    # =====================================================
     # /new
     # فقط ادمین
-    # =================================================
+    # =====================================================
 
     app.add_handler(
         CommandHandler(
@@ -956,9 +1011,9 @@ def main():
         )
     )
 
-    # =================================================
-    # دکمه ساخت پرامپت
-    # =================================================
+    # =====================================================
+    # دکمه ساخت پرامپت از عکس
+    # =====================================================
 
     app.add_handler(
         MessageHandler(
@@ -971,9 +1026,9 @@ def main():
         )
     )
 
-    # =================================================
-    # عکس برای ساخت پرامپت
-    # =================================================
+    # =====================================================
+    # دریافت عکس برای Gemini
+    # =====================================================
 
     app.add_handler(
         MessageHandler(
@@ -982,10 +1037,9 @@ def main():
         )
     )
 
-    # =================================================
-    # عکس برای /new
-    # فقط ادمین
-    # =================================================
+    # =====================================================
+    # دریافت عکس‌های /new
+    # =====================================================
 
     app.add_handler(
         MessageHandler(
@@ -994,9 +1048,9 @@ def main():
         )
     )
 
-    # =================================================
-    # متن پرامپت ادمین
-    # =================================================
+    # =====================================================
+    # دریافت متن پرامپت ادمین
+    # =====================================================
 
     app.add_handler(
         MessageHandler(
@@ -1006,9 +1060,9 @@ def main():
         )
     )
 
-    # =================================================
+    # =====================================================
     # بررسی عضویت
-    # =================================================
+    # =====================================================
 
     app.add_handler(
         CallbackQueryHandler(
@@ -1021,7 +1075,10 @@ def main():
         "Bot is running..."
     )
 
-    # اجرای ربات
+    # =====================================================
+    # اجرای Polling
+    # =====================================================
+
     app.run_polling()
 
 
