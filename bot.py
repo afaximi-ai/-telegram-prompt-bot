@@ -2,6 +2,7 @@ import os
 import uuid
 import json
 import sqlite3
+import asyncio
 
 from google import genai
 from google.genai import types
@@ -98,10 +99,6 @@ def save_prompt(
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    photo_ids_json = json.dumps(
-        photo_ids
-    )
-
     cursor.execute(
         """
         INSERT INTO prompts
@@ -111,7 +108,7 @@ def save_prompt(
         (
             prompt_id,
             prompt,
-            photo_ids_json
+            json.dumps(photo_ids)
         )
     )
 
@@ -149,16 +146,14 @@ def get_prompt(prompt_id):
 
 def get_main_keyboard():
 
-    keyboard = [
-        [
-            KeyboardButton(
-                PROMPT_BUTTON
-            )
-        ]
-    ]
-
     return ReplyKeyboardMarkup(
-        keyboard,
+        [
+            [
+                KeyboardButton(
+                    PROMPT_BUTTON
+                )
+            ]
+        ],
         resize_keyboard=True,
         is_persistent=True
     )
@@ -235,7 +230,7 @@ async def membership_message(
 
 
 # =========================================================
-# ارسال نتیجه پرامپت
+# ارسال پرامپت
 # فقط خود پرامپت
 # =========================================================
 
@@ -283,11 +278,9 @@ async def start(
 
     if context.args:
 
-        prompt_id = context.args[0]
-
         context.user_data[
             "pending_prompt_id"
-        ] = prompt_id
+        ] = context.args[0]
 
     if not await is_member(
         update,
@@ -331,7 +324,7 @@ async def start(
 
 
 # =========================================================
-# دکمه ساخت پرامپت از عکس
+# ساخت پرامپت از عکس
 # =========================================================
 
 async def prompt_from_photo_command(
@@ -357,7 +350,7 @@ async def prompt_from_photo_command(
     )
 
     context.user_data.pop(
-        "media_group_id",
+        "album_groups",
         None
     )
 
@@ -405,12 +398,6 @@ async def generate_prompt_from_photo(
         return
 
     try:
-
-        await update.message.reply_text(
-            "🔍 عکس دریافت شد...\n\n"
-            "🤖 در حال تحلیل تصویر و ساخت پرامپت...",
-            reply_markup=get_main_keyboard()
-        )
 
         photo = update.message.photo[-1]
 
@@ -503,11 +490,9 @@ Do not invent important elements that are not visible.
 
             return
 
-        generated_prompt = generated_prompt.strip()
-
         await send_prompt_result(
             update,
-            generated_prompt
+            generated_prompt.strip()
         )
 
     except Exception as e:
@@ -542,13 +527,11 @@ async def check_membership(
 
     query = update.callback_query
 
-    user_id = query.from_user.id
-
     try:
 
         member = await context.bot.get_chat_member(
             chat_id=CHANNEL,
-            user_id=user_id
+            user_id=query.from_user.id
         )
 
         joined = member.status in [
@@ -631,7 +614,7 @@ async def check_membership(
 
 
 # =========================================================
-# /new
+# شروع پست جدید
 # =========================================================
 
 async def new_prompt(
@@ -649,11 +632,15 @@ async def new_prompt(
     ] = []
 
     context.user_data[
-        "media_group_id"
-    ] = None
+        "album_groups"
+    ] = {}
+
+    context.user_data[
+        "collecting_post"
+    ] = True
 
     await update.message.reply_text(
-        "📸 حالا عکس‌ها را یکی‌یکی بفرست یا یک آلبوم را از کانال دیگر فوروارد کن.\n\n"
+        "📸 عکس‌ها را بفرست یا یک آلبوم را از کانال دیگر Forward کن.\n\n"
         "حداکثر ۱۰ عکس برای یک پست.\n\n"
         "بعد از تمام شدن عکس‌ها، پرامپت را بفرست.",
         reply_markup=get_main_keyboard()
@@ -661,7 +648,7 @@ async def new_prompt(
 
 
 # =========================================================
-# دریافت عکس ادمین
+# ذخیره عکس
 # =========================================================
 
 async def receive_photo(
@@ -675,96 +662,74 @@ async def receive_photo(
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
+
         return
 
-    if "photos" not in context.user_data:
+    if not context.user_data.get(
+        "collecting_post"
+    ):
+
         return
 
-    photos = context.user_data.get(
+    photos = context.user_data.setdefault(
         "photos",
         []
     )
 
     # =====================================================
-    # حداکثر ۱۰ عکس
-    # =====================================================
-
-    if len(photos) >= 10:
-
-        return
-
-    # =====================================================
-    # تشخیص Media Group
+    # تشخیص آلبوم
     # =====================================================
 
     media_group_id = update.message.media_group_id
 
-    # -----------------------------------------------------
-    # اگر اولین عکس یک آلبوم است
-    # -----------------------------------------------------
+    # =====================================================
+    # آلبوم
+    # =====================================================
 
     if media_group_id:
 
-        current_group_id = context.user_data.get(
-            "media_group_id"
+        album_groups = context.user_data.setdefault(
+            "album_groups",
+            {}
         )
 
-        # ---------------------------------------------
-        # اولین عکس آلبوم
-        # ---------------------------------------------
-
-        if current_group_id is None:
-
-            context.user_data[
-                "media_group_id"
-            ] = media_group_id
-
-            current_group_id = media_group_id
-
-            print(
-                f"NEW MEDIA GROUP: {media_group_id}"
-            )
-
-        # ---------------------------------------------
-        # اگر آلبوم دیگری آمد
-        # ---------------------------------------------
-
-        elif current_group_id != media_group_id:
-
-            print(
-                "Different media group ignored:"
-                f" {media_group_id}"
-            )
-
-            return
-
-        # ---------------------------------------------
-        # جلوگیری از ذخیره تکراری
-        # ---------------------------------------------
+        group = album_groups.setdefault(
+            media_group_id,
+            []
+        )
 
         photo_id = update.message.photo[-1].file_id
 
-        if photo_id not in photos:
+        if photo_id not in group:
 
-            photos.append(
+            group.append(
                 photo_id
             )
 
-        context.user_data[
-            "photos"
-        ] = photos
+        # -------------------------------------------------
+        # جمع کردن عکس‌های آلبوم
+        # -------------------------------------------------
+
+        if len(group) <= 10:
+
+            context.user_data[
+                "photos"
+            ] = group.copy()
 
         print(
-            "ALBUM PHOTO RECEIVED | "
-            f"group={media_group_id} | "
-            f"count={len(photos)}"
+            "FORWARDED ALBUM PHOTO:",
+            media_group_id,
+            len(group)
         )
 
-        # برای آلبوم به ازای هر عکس پیام نمی‌دهیم
+        # -------------------------------------------------
+        # Caption فورواردشده عمداً نادیده گرفته می‌شود
+        # -------------------------------------------------
+
         return
 
     # =====================================================
-    # عکس معمولی
+    # عکس تکی
     # =====================================================
 
     photo_id = update.message.photo[-1].file_id
@@ -775,14 +740,16 @@ async def receive_photo(
             photo_id
         )
 
-    context.user_data[
-        "photos"
-    ] = photos
+    if len(photos) > 10:
 
-    print(
-        "SINGLE PHOTO RECEIVED | "
-        f"count={len(photos)}"
-    )
+        photos.pop()
+
+        await update.message.reply_text(
+            "❌ حداکثر ۱۰ عکس برای هر پست مجاز است.",
+            reply_markup=get_main_keyboard()
+        )
+
+        return
 
     await update.message.reply_text(
         f"✅ عکس شماره {len(photos)} دریافت شد.\n\n"
@@ -802,7 +769,7 @@ async def handle_photo(
 ):
 
     # =====================================================
-    # ساخت پرامپت با Gemini
+    # Gemini
     # =====================================================
 
     if context.user_data.get(
@@ -817,13 +784,10 @@ async def handle_photo(
         return
 
     # =====================================================
-    # دریافت عکس ادمین
+    # پست ادمین
     # =====================================================
 
-    if (
-        update.effective_user.id == ADMIN_ID
-        and "photos" in context.user_data
-    ):
+    if update.effective_user.id == ADMIN_ID:
 
         await receive_photo(
             update,
@@ -834,7 +798,7 @@ async def handle_photo(
 
 
 # =========================================================
-# دریافت پرامپت ادمین
+# دریافت پرامپت
 # =========================================================
 
 async def receive_prompt(
@@ -848,14 +812,14 @@ async def receive_prompt(
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
+
         return
 
-    if "photos" not in context.user_data:
-        return
+    if not context.user_data.get(
+        "collecting_post"
+    ):
 
-    # =====================================================
-    # گرفتن کپی عکس‌ها
-    # =====================================================
+        return
 
     photos = list(
         context.user_data.get(
@@ -863,6 +827,10 @@ async def receive_prompt(
             []
         )
     )
+
+    # =====================================================
+    # بررسی عکس
+    # =====================================================
 
     if not photos:
 
@@ -890,25 +858,29 @@ async def receive_prompt(
 
     prompt = prompt.strip()
 
+    # =====================================================
+    # محدودیت
+    # =====================================================
+
+    if len(photos) > 10:
+
+        photos = photos[:10]
+
     print(
-        "========================================"
+        "======================================"
     )
 
     print(
-        "POST START"
+        "NEW POST"
     )
 
     print(
-        f"TOTAL PHOTOS: {len(photos)}"
+        "PHOTOS:",
+        len(photos)
     )
 
     print(
-        f"MEDIA GROUP: "
-        f"{context.user_data.get('media_group_id')}"
-    )
-
-    print(
-        "========================================"
+        "======================================"
     )
 
     # =====================================================
@@ -918,7 +890,7 @@ async def receive_prompt(
     prompt_id = uuid.uuid4().hex[:8]
 
     # =====================================================
-    # ذخیره
+    # ذخیره دیتابیس
     # =====================================================
 
     save_prompt(
@@ -928,7 +900,7 @@ async def receive_prompt(
     )
 
     # =====================================================
-    # لینک
+    # لینک ربات
     # =====================================================
 
     bot_info = await context.bot.get_me()
@@ -955,25 +927,24 @@ async def receive_prompt(
     ])
 
     # =====================================================
-    # ارسال به کانال
+    # ارسال کانال
     # =====================================================
 
     try:
 
         # =================================================
-        # فقط یک عکس
+        # یک عکس
         # =================================================
 
         if len(photos) == 1:
 
             print(
-                "SENDING ONE PHOTO"
+                "Sending single photo..."
             )
 
             await context.bot.send_photo(
                 chat_id=CHANNEL,
-                photo=photos[0],
-                reply_markup=keyboard
+                photo=photos[0]
             )
 
         # =================================================
@@ -983,7 +954,8 @@ async def receive_prompt(
         else:
 
             print(
-                f"SENDING ALBUM: {len(photos)} PHOTOS"
+                "Sending album...",
+                len(photos)
             )
 
             media = []
@@ -996,32 +968,28 @@ async def receive_prompt(
                     )
                 )
 
-            # ---------------------------------------------
-            # همه عکس‌ها در یک آلبوم
-            # ---------------------------------------------
-
             await context.bot.send_media_group(
                 chat_id=CHANNEL,
                 media=media
             )
 
             print(
-                "ALBUM SENT SUCCESSFULLY"
+                "Album sent."
             )
 
-            # ---------------------------------------------
-            # دکمه جداگانه زیر آلبوم
-            # ---------------------------------------------
+        # =================================================
+        # دکمه جداگانه
+        # =================================================
 
-            await context.bot.send_message(
-                chat_id=CHANNEL,
-                text="\u2063",
-                reply_markup=keyboard
-            )
+        await context.bot.send_message(
+            chat_id=CHANNEL,
+            text="✨ دریافت پرامپت",
+            reply_markup=keyboard
+        )
 
-            print(
-                "BUTTON SENT SUCCESSFULLY"
-            )
+        print(
+            "Button sent."
+        )
 
     except Exception as e:
 
@@ -1050,18 +1018,10 @@ async def receive_prompt(
     )
 
     # =====================================================
-    # پاک کردن اطلاعات موقت
+    # پاک کردن پست فعلی
     # =====================================================
 
-    context.user_data.pop(
-        "photos",
-        None
-    )
-
-    context.user_data.pop(
-        "media_group_id",
-        None
-    )
+    context.user_data.clear()
 
 
 # =========================================================
@@ -1084,7 +1044,7 @@ def main():
     )
 
     # =====================================================
-    # /start
+    # START
     # =====================================================
 
     app.add_handler(
@@ -1095,7 +1055,7 @@ def main():
     )
 
     # =====================================================
-    # /new
+    # NEW
     # =====================================================
 
     app.add_handler(
@@ -1144,7 +1104,7 @@ def main():
     )
 
     # =====================================================
-    # بررسی عضویت
+    # عضویت
     # =====================================================
 
     app.add_handler(
