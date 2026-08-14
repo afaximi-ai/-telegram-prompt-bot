@@ -102,9 +102,18 @@ def init_db():
 
     except sqlite3.OperationalError:
 
-        # اگر ستون از قبل وجود داشته باشد،
-        # خطا نادیده گرفته می‌شود.
         pass
+
+    # =====================================================
+    # جدول کاربران ربات
+    # =====================================================
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()
     conn.close()
@@ -158,6 +167,50 @@ def get_prompt(prompt_id):
         return result[0]
 
     return None
+
+
+# =========================================================
+# ثبت کاربر ربات
+# =========================================================
+
+def save_user(user_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO users
+        (user_id)
+        VALUES (?)
+        """,
+        (user_id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_users_count():
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM users
+        """
+    )
+
+    result = cursor.fetchone()
+
+    conn.close()
+
+    if result:
+        return result[0]
+
+    return 0
 
 
 # =========================================================
@@ -341,6 +394,14 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    # =====================================================
+    # ثبت کاربر
+    # =====================================================
+
+    save_user(
+        update.effective_user.id
+    )
+
     if context.args:
 
         context.user_data[
@@ -398,6 +459,43 @@ async def start(
         "برای ساخت پرامپت از روی عکس، "
         "دکمه زیر را بزن و سپس عکس را ارسال کن. 👇",
         reply_markup=get_main_keyboard()
+    )
+
+
+# =========================================================
+# آمار ربات
+# =========================================================
+
+async def stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    users_count = get_users_count()
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT COALESCE(SUM(downloads), 0)
+        FROM prompts
+        """
+    )
+
+    result = cursor.fetchone()
+
+    conn.close()
+
+    total_downloads = result[0] if result else 0
+
+    await update.message.reply_text(
+        "📊 آمار ربات\n\n"
+        f"👥 تعداد کاربران ربات: {users_count}\n"
+        f"📥 مجموع دریافت پرامپت‌ها: {total_downloads}"
     )
 
 
@@ -1118,6 +1216,17 @@ def main():
         CommandHandler(
             "start",
             start
+        )
+    )
+
+    # =====================================================
+    # STATS
+    # =====================================================
+
+    app.add_handler(
+        CommandHandler(
+            "stats",
+            stats
         )
     )
 
