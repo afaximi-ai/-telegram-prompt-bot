@@ -46,6 +46,8 @@ GEMINI_MODEL = "gemini-3.5-flash"
 
 PROMPT_BUTTON = "🪄 ✨ ساخت پرامپت از عکس"
 
+STATS_BUTTON = "📊 آمار ربات"
+
 
 # =========================================================
 # Gemini
@@ -263,16 +265,29 @@ def get_prompt_downloads(prompt_id):
 # کیبورد اصلی
 # =========================================================
 
-def get_main_keyboard():
+def get_main_keyboard(user_id=None):
 
-    return ReplyKeyboardMarkup(
+    buttons = [
         [
+            KeyboardButton(
+                PROMPT_BUTTON
+            )
+        ]
+    ]
+
+    # فقط ادمین دکمه آمار را می‌بیند
+    if user_id == ADMIN_ID:
+
+        buttons.append(
             [
                 KeyboardButton(
-                    PROMPT_BUTTON
+                    STATS_BUTTON
                 )
             ]
-        ],
+        )
+
+    return ReplyKeyboardMarkup(
+        buttons,
         resize_keyboard=True,
         is_persistent=True
     )
@@ -381,7 +396,9 @@ async def send_prompt_result(
 
         await update.message.reply_text(
             prompt,
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(
+                update.effective_user.id
+            )
         )
 
 
@@ -458,7 +475,9 @@ async def start(
         "به ربات Prompt Realistic خوش آمدی ✨\n\n"
         "برای ساخت پرامپت از روی عکس، "
         "دکمه زیر را بزن و سپس عکس را ارسال کن. 👇",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(
+            update.effective_user.id
+        )
     )
 
 
@@ -495,7 +514,28 @@ async def stats(
     await update.message.reply_text(
         "📊 آمار ربات\n\n"
         f"👥 تعداد کاربران ربات: {users_count}\n"
-        f"📥 مجموع دریافت پرامپت‌ها: {total_downloads}"
+        f"📥 مجموع دریافت پرامپت‌ها: {total_downloads}",
+        reply_markup=get_main_keyboard(
+            update.effective_user.id
+        )
+    )
+
+
+# =========================================================
+# دکمه آمار ربات
+# =========================================================
+
+async def stats_button(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if update.effective_user.id != ADMIN_ID:
+        return
+
+    await stats(
+        update,
+        context
     )
 
 
@@ -539,7 +579,9 @@ async def prompt_from_photo_command(
         "📸 حالا عکس را ارسال کن.\n\n"
         "🤖 عکس را بررسی می‌کنم و یک پرامپت "
         "انگلیسی حرفه‌ای و دقیق برایت می‌سازم.",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(
+            update.effective_user.id
+        )
     )
 
 
@@ -563,7 +605,9 @@ async def generate_prompt_from_photo(
         await update.message.reply_text(
             "❌ API جمینای تنظیم نشده است.\n\n"
             "GEMINI_API_KEY را در Railway Variables قرار بده.",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(
+                update.effective_user.id
+            )
         )
 
         context.user_data.pop(
@@ -661,7 +705,9 @@ Do not invent important elements that are not visible.
 
             await update.message.reply_text(
                 "❌ Gemini نتوانست پرامپت تولید کند.",
-                reply_markup=get_main_keyboard()
+                reply_markup=get_main_keyboard(
+                    update.effective_user.id
+                )
             )
 
             return
@@ -681,7 +727,9 @@ Do not invent important elements that are not visible.
         await update.message.reply_text(
             "❌ هنگام ساخت پرامپت خطایی رخ داد.\n\n"
             "لطفاً دوباره امتحان کن.",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(
+                update.effective_user.id
+            )
         )
 
     finally:
@@ -786,7 +834,9 @@ async def check_membership(
 
                 await query.message.reply_text(
                     prompt,
-                    reply_markup=get_main_keyboard()
+                    reply_markup=get_main_keyboard(
+                        query.from_user.id
+                    )
                 )
 
             try:
@@ -832,7 +882,9 @@ async def new_prompt(
         "📸 عکس‌ها را بفرست یا یک آلبوم را از کانال دیگر Forward کن.\n\n"
         "حداکثر ۱۰ عکس برای یک پست.\n\n"
         "بعد از تمام شدن عکس‌ها، پرامپت را بفرست.",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(
+            update.effective_user.id
+        )
     )
 
 
@@ -939,7 +991,9 @@ async def receive_photo(
             await update.message.reply_text(
                 f"✅ {len(current_group)} عکس دریافت شد.\n\n"
                 "📝 حالا پرامپت را بفرست تا عکس‌ها و پرامپت را باهم در کانال منتشر کنم.",
-                reply_markup=get_main_keyboard()
+                reply_markup=get_main_keyboard(
+                    update.effective_user.id
+                )
             )
 
         return
@@ -1116,12 +1170,6 @@ async def receive_prompt(
 
         if len(photos) == 1:
 
-            # =================================================
-            # عکس تکی:
-            # دکمه مستقیماً زیر خود عکس قرار می‌گیرد
-            # هیچ پیام خالی یا پیام جداگانه‌ای ایجاد نمی‌شود
-            # =================================================
-
             await context.bot.send_photo(
                 chat_id=CHANNEL,
                 photo=photos[0],
@@ -1129,10 +1177,6 @@ async def receive_prompt(
             )
 
         else:
-
-            # =================================================
-            # آلبوم چندعکسی
-            # =================================================
 
             media = []
 
@@ -1149,7 +1193,6 @@ async def receive_prompt(
                 media=media
             )
 
-            # برای آلبوم، دکمه جداگانه ارسال می‌شود
             await context.bot.send_message(
                 chat_id=CHANNEL,
                 text="✨ دریافت پرامپت",
@@ -1166,7 +1209,9 @@ async def receive_prompt(
         await update.message.reply_text(
             "❌ خطا هنگام ارسال پست به کانال:\n\n"
             f"{e}",
-            reply_markup=get_main_keyboard()
+            reply_markup=get_main_keyboard(
+                update.effective_user.id
+            )
         )
 
         return
@@ -1179,7 +1224,9 @@ async def receive_prompt(
         "✅ پست با موفقیت در کانال منتشر شد!\n\n"
         f"📸 تعداد عکس‌ها: {len(photos)}\n"
         f"🆔 شناسه پرامپت: {prompt_id}",
-        reply_markup=get_main_keyboard()
+        reply_markup=get_main_keyboard(
+            update.effective_user.id
+        )
     )
 
     # =====================================================
@@ -1253,6 +1300,21 @@ def main():
                 f"^{PROMPT_BUTTON}$"
             ),
             prompt_from_photo_command
+        )
+    )
+
+    # =====================================================
+    # دکمه آمار ربات
+    # =====================================================
+
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT
+            & ~filters.COMMAND
+            & filters.Regex(
+                f"^{STATS_BUTTON}$"
+            ),
+            stats_button
         )
     )
 
