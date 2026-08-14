@@ -804,7 +804,7 @@ async def receive_prompt(
     prompt_id = uuid.uuid4().hex[:8]
 
     # =====================================================
-    # ذخیره
+    # ذخیره پرامپت و عکس‌ها
     # =====================================================
 
     save_prompt(
@@ -841,39 +841,59 @@ async def receive_prompt(
     ])
 
     # =====================================================
-    # ارسال آلبوم
+    # ارسال به کانال
     # =====================================================
 
     try:
 
-        media = []
+        # =================================================
+        # اگر فقط یک عکس داریم
+        # =================================================
 
-        for photo_id in photos:
+        if len(photos) == 1:
 
-            media.append(
-                InputMediaPhoto(
-                    media=photo_id
-                )
+            await context.bot.send_photo(
+                chat_id=CHANNEL,
+                photo=photos[0],
+                caption=CHANNEL_NAME,
+                reply_markup=keyboard
             )
 
-        # -------------------------------------------------
-        # ارسال همه عکس‌ها به صورت یک آلبوم
-        # -------------------------------------------------
+        # =================================================
+        # اگر چند عکس داریم
+        # همه به صورت یک آلبوم ارسال می‌شوند
+        # =================================================
 
-        await context.bot.send_media_group(
-            chat_id=CHANNEL,
-            media=media
-        )
+        else:
 
-        # -------------------------------------------------
-        # پیام زیر آلبوم + دکمه
-        # -------------------------------------------------
+            media_group = []
 
-        await context.bot.send_message(
-            chat_id=CHANNEL,
-            text=CHANNEL_NAME,
-            reply_markup=keyboard
-        )
+            for photo_id in photos:
+
+                media_group.append(
+                    InputMediaPhoto(
+                        media=photo_id
+                    )
+                )
+
+            # ---------------------------------------------
+            # ارسال آلبوم
+            # ---------------------------------------------
+
+            await context.bot.send_media_group(
+                chat_id=CHANNEL,
+                media=media_group
+            )
+
+            # ---------------------------------------------
+            # پیام دکمه‌دار بعد از آلبوم
+            # ---------------------------------------------
+
+            await context.bot.send_message(
+                chat_id=CHANNEL,
+                text=CHANNEL_NAME,
+                reply_markup=keyboard
+            )
 
     except Exception as e:
 
@@ -883,7 +903,7 @@ async def receive_prompt(
         )
 
         await update.message.reply_text(
-            "❌ خطا هنگام ارسال عکس‌ها به کانال:\n\n"
+            "❌ خطا هنگام ارسال پست به کانال:\n\n"
             f"{e}",
             reply_markup=get_main_keyboard()
         )
@@ -961,7 +981,7 @@ def main():
     )
 
     # =====================================================
-    # تنها PHOTO handler
+    # دریافت عکس
     # =====================================================
 
     app.add_handler(
@@ -972,7 +992,7 @@ def main():
     )
 
     # =====================================================
-    # دریافت متن
+    # دریافت متن / پرامپت
     # =====================================================
 
     app.add_handler(
