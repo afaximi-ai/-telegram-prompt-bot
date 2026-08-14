@@ -87,6 +87,25 @@ def init_db():
         )
     """)
 
+    # =====================================================
+    # اضافه کردن شمارنده دریافت پرامپت
+    # =====================================================
+
+    try:
+
+        cursor.execute(
+            """
+            ALTER TABLE prompts
+            ADD COLUMN downloads INTEGER DEFAULT 0
+            """
+        )
+
+    except sqlite3.OperationalError:
+
+        # اگر ستون از قبل وجود داشته باشد،
+        # خطا نادیده گرفته می‌شود.
+        pass
+
     conn.commit()
     conn.close()
 
@@ -139,6 +158,52 @@ def get_prompt(prompt_id):
         return result[0]
 
     return None
+
+
+# =========================================================
+# شمارش دریافت پرامپت
+# =========================================================
+
+def increment_prompt_download(prompt_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        UPDATE prompts
+        SET downloads = downloads + 1
+        WHERE id = ?
+        """,
+        (prompt_id,)
+    )
+
+    conn.commit()
+    conn.close()
+
+
+def get_prompt_downloads(prompt_id):
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    cursor.execute(
+        """
+        SELECT downloads
+        FROM prompts
+        WHERE id = ?
+        """,
+        (prompt_id,)
+    )
+
+    result = cursor.fetchone()
+
+    conn.close()
+
+    if result:
+        return result[0] or 0
+
+    return 0
 
 
 # =========================================================
@@ -306,6 +371,19 @@ async def start(
         )
 
         if prompt:
+
+            # افزایش تعداد دریافت
+            increment_prompt_download(
+                prompt_id
+            )
+
+            downloads = get_prompt_downloads(
+                prompt_id
+            )
+
+            await update.message.reply_text(
+                f"📥 تعداد دریافت این پرامپت: {downloads}"
+            )
 
             await send_prompt_result(
                 update,
@@ -574,6 +652,19 @@ async def check_membership(
         )
 
         if prompt:
+
+            # افزایش تعداد دریافت
+            increment_prompt_download(
+                prompt_id
+            )
+
+            downloads = get_prompt_downloads(
+                prompt_id
+            )
+
+            await query.message.reply_text(
+                f"📥 تعداد دریافت این پرامپت: {downloads}"
+            )
 
             if len(prompt) <= 256:
 
