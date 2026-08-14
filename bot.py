@@ -356,6 +356,11 @@ async def prompt_from_photo_command(
         None
     )
 
+    context.user_data.pop(
+        "media_group_id",
+        None
+    )
+
     context.user_data[
         "waiting_for_prompt_from_photo"
     ] = True
@@ -643,9 +648,12 @@ async def new_prompt(
         "photos"
     ] = []
 
+    context.user_data[
+        "media_group_id"
+    ] = None
+
     await update.message.reply_text(
-        "📸 حالا عکس‌ها را یکی‌یکی بفرست.\n\n"
-        "می‌توانی چند عکس بفرستی.\n"
+        "📸 حالا عکس‌ها را یکی‌یکی بفرست یا یک آلبوم را از کانال دیگر فوروارد کن.\n\n"
         "حداکثر ۱۰ عکس برای یک پست.\n\n"
         "بعد از تمام شدن عکس‌ها، پرامپت را بفرست.",
         reply_markup=get_main_keyboard()
@@ -672,30 +680,112 @@ async def receive_photo(
     if "photos" not in context.user_data:
         return
 
-    photos = context.user_data[
-        "photos"
-    ]
+    photos = context.user_data.get(
+        "photos",
+        []
+    )
+
+    # =====================================================
+    # حداکثر ۱۰ عکس
+    # =====================================================
 
     if len(photos) >= 10:
 
-        await update.message.reply_text(
-            "❌ برای یک پست حداکثر ۱۰ عکس می‌توانی بفرستی.\n\n"
-            "حالا پرامپت را بفرست.",
-            reply_markup=get_main_keyboard()
+        return
+
+    # =====================================================
+    # تشخیص Media Group
+    # =====================================================
+
+    media_group_id = update.message.media_group_id
+
+    # -----------------------------------------------------
+    # اگر اولین عکس یک آلبوم است
+    # -----------------------------------------------------
+
+    if media_group_id:
+
+        current_group_id = context.user_data.get(
+            "media_group_id"
         )
 
+        # ---------------------------------------------
+        # اولین عکس آلبوم
+        # ---------------------------------------------
+
+        if current_group_id is None:
+
+            context.user_data[
+                "media_group_id"
+            ] = media_group_id
+
+            current_group_id = media_group_id
+
+            print(
+                f"NEW MEDIA GROUP: {media_group_id}"
+            )
+
+        # ---------------------------------------------
+        # اگر آلبوم دیگری آمد
+        # ---------------------------------------------
+
+        elif current_group_id != media_group_id:
+
+            print(
+                "Different media group ignored:"
+                f" {media_group_id}"
+            )
+
+            return
+
+        # ---------------------------------------------
+        # جلوگیری از ذخیره تکراری
+        # ---------------------------------------------
+
+        photo_id = update.message.photo[-1].file_id
+
+        if photo_id not in photos:
+
+            photos.append(
+                photo_id
+            )
+
+        context.user_data[
+            "photos"
+        ] = photos
+
+        print(
+            "ALBUM PHOTO RECEIVED | "
+            f"group={media_group_id} | "
+            f"count={len(photos)}"
+        )
+
+        # برای آلبوم به ازای هر عکس پیام نمی‌دهیم
         return
+
+    # =====================================================
+    # عکس معمولی
+    # =====================================================
 
     photo_id = update.message.photo[-1].file_id
 
-    photos.append(
-        photo_id
+    if photo_id not in photos:
+
+        photos.append(
+            photo_id
+        )
+
+    context.user_data[
+        "photos"
+    ] = photos
+
+    print(
+        "SINGLE PHOTO RECEIVED | "
+        f"count={len(photos)}"
     )
 
-    count = len(photos)
-
     await update.message.reply_text(
-        f"✅ عکس شماره {count} دریافت شد.\n\n"
+        f"✅ عکس شماره {len(photos)} دریافت شد.\n\n"
         "📸 اگر عکس دیگری داری بفرست.\n"
         "📝 وقتی تمام شد، پرامپت را بفرست.",
         reply_markup=get_main_keyboard()
@@ -703,7 +793,7 @@ async def receive_photo(
 
 
 # =========================================================
-# هندلر واحد عکس
+# هندلر عکس
 # =========================================================
 
 async def handle_photo(
@@ -711,9 +801,9 @@ async def handle_photo(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # -----------------------------------------
+    # =====================================================
     # ساخت پرامپت با Gemini
-    # -----------------------------------------
+    # =====================================================
 
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
@@ -726,9 +816,9 @@ async def handle_photo(
 
         return
 
-    # -----------------------------------------
-    # دریافت عکس برای پست کانال
-    # -----------------------------------------
+    # =====================================================
+    # دریافت عکس ادمین
+    # =====================================================
 
     if (
         update.effective_user.id == ADMIN_ID
@@ -763,9 +853,16 @@ async def receive_prompt(
     if "photos" not in context.user_data:
         return
 
-    photos = context.user_data[
-        "photos"
-    ]
+    # =====================================================
+    # گرفتن کپی عکس‌ها
+    # =====================================================
+
+    photos = list(
+        context.user_data.get(
+            "photos",
+            []
+        )
+    )
 
     if not photos:
 
@@ -775,6 +872,10 @@ async def receive_prompt(
         )
 
         return
+
+    # =====================================================
+    # پرامپت
+    # =====================================================
 
     prompt = update.message.text
 
@@ -788,6 +889,27 @@ async def receive_prompt(
         return
 
     prompt = prompt.strip()
+
+    print(
+        "========================================"
+    )
+
+    print(
+        "POST START"
+    )
+
+    print(
+        f"TOTAL PHOTOS: {len(photos)}"
+    )
+
+    print(
+        f"MEDIA GROUP: "
+        f"{context.user_data.get('media_group_id')}"
+    )
+
+    print(
+        "========================================"
+    )
 
     # =====================================================
     # ساخت ID
@@ -806,7 +928,7 @@ async def receive_prompt(
     )
 
     # =====================================================
-    # ساخت لینک
+    # لینک
     # =====================================================
 
     bot_info = await context.bot.get_me()
@@ -820,7 +942,7 @@ async def receive_prompt(
     )
 
     # =====================================================
-    # دکمه دریافت پرامپت
+    # دکمه
     # =====================================================
 
     keyboard = InlineKeyboardMarkup([
@@ -844,6 +966,10 @@ async def receive_prompt(
 
         if len(photos) == 1:
 
+            print(
+                "SENDING ONE PHOTO"
+            )
+
             await context.bot.send_photo(
                 chat_id=CHANNEL,
                 photo=photos[0],
@@ -856,6 +982,10 @@ async def receive_prompt(
 
         else:
 
+            print(
+                f"SENDING ALBUM: {len(photos)} PHOTOS"
+            )
+
             media = []
 
             for photo_id in photos:
@@ -867,7 +997,7 @@ async def receive_prompt(
                 )
 
             # ---------------------------------------------
-            # همه عکس‌ها فقط داخل یک Media Group
+            # همه عکس‌ها در یک آلبوم
             # ---------------------------------------------
 
             await context.bot.send_media_group(
@@ -875,11 +1005,13 @@ async def receive_prompt(
                 media=media
             )
 
+            print(
+                "ALBUM SENT SUCCESSFULLY"
+            )
+
             # ---------------------------------------------
-            # پیام جداگانه فقط برای دکمه
+            # دکمه جداگانه زیر آلبوم
             # ---------------------------------------------
-            # متن نامرئی است تا چیزی در کانال دیده نشود.
-            # تلگرام پیام کاملاً بدون text را قبول نمی‌کند.
 
             await context.bot.send_message(
                 chat_id=CHANNEL,
@@ -887,10 +1019,14 @@ async def receive_prompt(
                 reply_markup=keyboard
             )
 
+            print(
+                "BUTTON SENT SUCCESSFULLY"
+            )
+
     except Exception as e:
 
         print(
-            "Channel send error:",
+            "CHANNEL SEND ERROR:",
             repr(e)
         )
 
@@ -917,7 +1053,15 @@ async def receive_prompt(
     # پاک کردن اطلاعات موقت
     # =====================================================
 
-    context.user_data.clear()
+    context.user_data.pop(
+        "photos",
+        None
+    )
+
+    context.user_data.pop(
+        "media_group_id",
+        None
+    )
 
 
 # =========================================================
@@ -932,6 +1076,10 @@ def main():
         Application
         .builder()
         .token(TOKEN)
+        .connect_timeout(60)
+        .read_timeout(60)
+        .write_timeout(60)
+        .pool_timeout(60)
         .build()
     )
 
@@ -973,7 +1121,7 @@ def main():
     )
 
     # =====================================================
-    # دریافت عکس
+    # عکس
     # =====================================================
 
     app.add_handler(
@@ -984,7 +1132,7 @@ def main():
     )
 
     # =====================================================
-    # دریافت متن
+    # متن
     # =====================================================
 
     app.add_handler(
