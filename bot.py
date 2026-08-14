@@ -44,8 +44,6 @@ GEMINI_MODEL = "gemini-3.5-flash"
 
 PROMPT_BUTTON = "🪄 ✨ ساخت پرامپت از عکس"
 
-CHANNEL_NAME = "Prompt Realistic ✨"
-
 
 # =========================================================
 # Gemini
@@ -100,7 +98,9 @@ def save_prompt(
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    photo_ids_json = json.dumps(photo_ids)
+    photo_ids_json = json.dumps(
+        photo_ids
+    )
 
     cursor.execute(
         """
@@ -259,19 +259,14 @@ async def send_prompt_result(
         ])
 
         await update.message.reply_text(
-            "✨ پرامپت ساخته شد:\n\n"
-            + prompt,
+            prompt,
             reply_markup=keyboard
         )
 
     else:
 
         await update.message.reply_text(
-            "✨ پرامپت ساخته شد:\n\n"
-            + prompt
-            + "\n\n"
-            "📋 برای کپی کردن، روی متن پیام نگه دار "
-            "و گزینه Copy را بزن.",
+            prompt,
             reply_markup=get_main_keyboard()
         )
 
@@ -604,16 +599,14 @@ async def check_membership(
                 ])
 
                 await query.message.reply_text(
-                    "✨ پرامپت:\n\n"
-                    + prompt,
+                    prompt,
                     reply_markup=keyboard
                 )
 
             else:
 
                 await query.message.reply_text(
-                    "✨ پرامپت:\n\n"
-                    + prompt,
+                    prompt,
                     reply_markup=get_main_keyboard()
                 )
 
@@ -830,7 +823,6 @@ async def receive_prompt(
             await context.bot.send_photo(
                 chat_id=CHANNEL,
                 photo=photos[0],
-                caption=CHANNEL_NAME,
                 reply_markup=keyboard
             )
 
@@ -853,10 +845,9 @@ async def receive_prompt(
                 media=media
             )
 
-            # پیام مستقل دکمه‌دار
+            # فقط دکمه، جداگانه بعد از آلبوم
             await context.bot.send_message(
                 chat_id=CHANNEL,
-                text=CHANNEL_NAME,
                 reply_markup=keyboard
             )
 
@@ -961,4 +952,5 @@ def main():
 # =========================================================
 
 if __name__ == "__main__":
+
     main()
