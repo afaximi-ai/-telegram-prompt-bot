@@ -15,6 +15,7 @@ from telegram import (
     KeyboardButton,
     CopyTextButton,
     InputMediaPhoto,
+    ReplyKeyboardRemove,
 )
 
 from telegram.ext import (
@@ -685,10 +686,6 @@ async def receive_photo(
     ):
         return
 
-    # =====================================================
-    # بدون نیاز به /new
-    # =====================================================
-
     context.user_data[
         "collecting_post"
     ] = True
@@ -737,15 +734,7 @@ async def receive_photo(
             len(group)
         )
 
-        # -------------------------------------------------
-        # صبر می‌کنیم همه عکس‌های آلبوم برسند
-        # -------------------------------------------------
-
         await asyncio.sleep(1.5)
-
-        # -------------------------------------------------
-        # فقط آخرین عکس آلبوم پیام درخواست پرامپت می‌دهد
-        # -------------------------------------------------
 
         current_group = album_groups.get(
             media_group_id,
@@ -784,13 +773,19 @@ async def receive_photo(
 
         await update.message.reply_text(
             "❌ حداکثر ۱۰ عکس برای هر پست مجاز است.",
-            reply_markup=get_main_keyboard()
+            reply_markup=ReplyKeyboardRemove()
         )
 
         return
 
+    # =====================================================
+    # فقط عکس تکی
+    # حذف کامل کیبورد پایین تلگرام
+    # =====================================================
+
     await update.message.reply_text(
-        "📝 پرامپت را بفرست تا عکس و پرامپت را باهم در کانال منتشر کنم."
+        "📝 پرامپت را بفرست تا عکس و پرامپت را باهم در کانال منتشر کنم.",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -803,10 +798,6 @@ async def handle_photo(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    # =====================================================
-    # Gemini
-    # =====================================================
-
     if context.user_data.get(
         "waiting_for_prompt_from_photo"
     ):
@@ -817,10 +808,6 @@ async def handle_photo(
         )
 
         return
-
-    # =====================================================
-    # پست ادمین
-    # =====================================================
 
     if update.effective_user.id == ADMIN_ID:
 
@@ -856,17 +843,9 @@ async def receive_prompt(
         )
     )
 
-    # =====================================================
-    # بررسی عکس
-    # =====================================================
-
     if not photos:
 
         return
-
-    # =====================================================
-    # پرامپت
-    # =====================================================
 
     prompt = update.message.text
 
@@ -969,10 +948,6 @@ async def receive_prompt(
                 chat_id=CHANNEL,
                 media=media
             )
-
-        # =================================================
-        # دکمه جداگانه
-        # =================================================
 
         await context.bot.send_message(
             chat_id=CHANNEL,
