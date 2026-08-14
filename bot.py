@@ -846,10 +846,11 @@ async def receive_prompt(
             )
 
             # فقط دکمه، جداگانه بعد از آلبوم
-            await context.bot.send_message(
-                chat_id=CHANNEL,
-                reply_markup=keyboard
-            )
+await context.bot.send_message(
+    chat_id=CHANNEL,
+    text="✨ دریافت پرامپت",
+    reply_markup=keyboard
+)
 
     except Exception as e:
 
