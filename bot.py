@@ -13,6 +13,7 @@ from telegram import (
     ReplyKeyboardMarkup,
     KeyboardButton,
     CopyTextButton,
+    InputMediaPhoto,
 )
 
 from telegram.ext import (
@@ -43,7 +44,6 @@ GEMINI_MODEL = "gemini-3.5-flash"
 
 PROMPT_BUTTON = "🪄 ✨ ساخت پرامپت از عکس"
 
-# متن زیر عکس
 CHANNEL_NAME = "Prompt Realistic ✨"
 
 
@@ -841,40 +841,39 @@ async def receive_prompt(
     ])
 
     # =====================================================
-    # ارسال عکس‌ها
-    #
-    # عکس اول:
-    # متن + دکمه
-    #
-    # عکس‌های بعدی:
-    # فقط عکس
-    #
-    # هیچ edit_message_reply_markup وجود ندارد.
+    # ارسال آلبوم
     # =====================================================
 
     try:
 
+        media = []
+
+        for photo_id in photos:
+
+            media.append(
+                InputMediaPhoto(
+                    media=photo_id
+                )
+            )
+
         # -------------------------------------------------
-        # عکس اول
+        # ارسال همه عکس‌ها به صورت یک آلبوم
         # -------------------------------------------------
 
-        await context.bot.send_photo(
+        await context.bot.send_media_group(
             chat_id=CHANNEL,
-            photo=photos[0],
-            caption=CHANNEL_NAME,
-            reply_markup=keyboard
+            media=media
         )
 
         # -------------------------------------------------
-        # عکس‌های بعدی
+        # پیام زیر آلبوم + دکمه
         # -------------------------------------------------
 
-        for photo_id in photos[1:]:
-
-            await context.bot.send_photo(
-                chat_id=CHANNEL,
-                photo=photo_id
-            )
+        await context.bot.send_message(
+            chat_id=CHANNEL,
+            text=CHANNEL_NAME,
+            reply_markup=keyboard
+        )
 
     except Exception as e:
 
